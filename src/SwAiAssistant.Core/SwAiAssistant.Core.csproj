@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Core</RootNamespace>
+    <AssemblyName>SwAiAssistant.Core</AssemblyName>
+    <Description>SwAiAssistant 共享内核：日志、DPAPI 配置、JSON、HTTP、STA 封送</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Newtonsoft.Json (MIT) -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ProtectedData（DPAPI）位于 System.Security -->
+    <Reference Include="System.Security" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+</Project>

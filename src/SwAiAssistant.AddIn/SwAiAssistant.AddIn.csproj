@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SwAiAssistant.AddIn 采用经典（非 SDK）net48 工程格式：
+  - WPF(Page XAML) + WinForms(ElementHost 宿主) 编译链最稳；
+  - 由安装.bat 显式 RegAsm /codebase 注册，不在构建期自动注册。
+-->
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <ProjectGuid>{A17E2C44-7A6D-4E0B-9F33-5C2A1B6D7E01}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>SwAiAssistant.AddIn</RootNamespace>
+    <AssemblyName>SwAiAssistant.AddIn</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <WarningLevel>4</WarningLevel>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\x64\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
+    <DebugType>portable</DebugType>
+    <Optimize>true</Optimize>
+    <!-- 与 SDK 工程对齐输出目录，作为发布打包的暂存目录 -->
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsFormsIntegration" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SwRedistDir)' != ''">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>False</Private>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>False</Private>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <Private>False</Private>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Ai\SwAiAssistant.Ai.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Cad\SwAiAssistant.Cad.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Planner\SwAiAssistant.Planner.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Verify\SwAiAssistant.Verify.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Reverse\SwAiAssistant.Reverse.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="AddInRegistration.cs" />
+    <Compile Include="SwAddIn.cs" />
+    <Compile Include="Ribbon\RibbonController.cs" />
+    <Compile Include="Hosting\IconFactory.cs" />
+    <Compile Include="Hosting\TaskPaneHost.cs" />
+    <Compile Include="UI\TaskPaneView.xaml.cs">
+      <DependentUpon>TaskPaneView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\DocChoiceDialog.xaml.cs">
+      <DependentUpon>DocChoiceDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\ModelEditDialog.xaml.cs">
+      <DependentUpon>ModelEditDialog.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="UI\TaskPaneView.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="UI\DocChoiceDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="UI\ModelEditDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

@@ -1,0 +1,56 @@
+<Window x:Class="SwAiAssistant.AddIn.UI.ModelEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="模型配置" Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="预设提供商（选填：自动填 Base URL 与推荐模型名）" Margin="0,0,0,2"/>
+            <ComboBox x:Name="ProviderBox" Padding="4,2" SelectionChanged="ProviderBox_SelectionChanged"/>
+            <TextBlock Text="名称" Margin="0,8,0,2"/>
+            <TextBox x:Name="NameBox" Padding="4,2"/>
+            <TextBlock Text="Base URL（OpenAI 兼容填端点根地址；Ollama 填 http://127.0.0.1:11434）"
+                       TextWrapping="Wrap" Margin="0,8,0,2" Foreground="#FF555555"/>
+            <TextBox x:Name="BaseUrlBox" Padding="4,2"/>
+            <TextBlock x:Name="KeyLabel" Text="API Key" Margin="0,8,0,2"/>
+            <TextBox x:Name="ApiKeyBox" Padding="4,2"/>
+            <TextBlock x:Name="KeyHint" Text="" TextWrapping="Wrap" Margin="0,2,0,0"
+                       Foreground="#FF888888" FontSize="11"/>
+            <TextBlock x:Name="ModelLabel" Text="模型名（如 deepseek-chat / qwen2.5:14b）" Margin="0,8,0,2"/>
+            <TextBox x:Name="ModelBox" Padding="4,2"/>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <TextBlock Text="协议：" VerticalAlignment="Center"/>
+                <ComboBox x:Name="ProtocolBox" Width="180" Padding="4,2">
+                    <ComboBoxItem Content="自动识别" Tag="Auto" IsSelected="True"/>
+                    <ComboBoxItem Content="OpenAI 兼容" Tag="OpenAiCompatible"/>
+                    <ComboBoxItem Content="Ollama（本机）" Tag="Ollama"/>
+                </ComboBox>
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.Row="1" Margin="0,12,0,0" Padding="8" Background="#FFF5F5F5" CornerRadius="4">
+            <StackPanel>
+                <TextBlock Text="能力兜底（探测失败时以此为准）" FontWeight="Bold" FontSize="11"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <CheckBox x:Name="ManualTextBox" Content="文本" Margin="0,0,12,0"/>
+                    <CheckBox x:Name="ManualVisionBox" Content="视觉" Margin="0,0,12,0"/>
+                    <TextBlock Text="上下文 token：" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ManualContextBox" Width="70" Padding="4,2" Text="0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <TextBlock x:Name="ErrorText" Foreground="#FFB00000" FontSize="11"
+                       VerticalAlignment="Center" Margin="0,0,12,0" TextWrapping="Wrap" MaxWidth="200"/>
+            <Button Content="取消" Width="72" Margin="0,0,8,0" Padding="0,4" IsCancel="True"/>
+            <Button Content="保存" Width="72" Padding="0,4" IsDefault="True" Click="SaveClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

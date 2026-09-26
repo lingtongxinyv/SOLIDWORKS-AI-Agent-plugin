@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Reverse</RootNamespace>
+    <AssemblyName>SwAiAssistant.Reverse</AssemblyName>
+    <Description>图纸反建（M8/M9）：DXF 结构化提取与 ReversePlanner、图片/PDF 视觉反建；不触碰 COM</Description>
+    <!--
+      PDF 首页转图用 Windows 10+ 系统自带 Windows.Data.Pdf（零三方部署）。
+      winmd 仅编译期需要：探测本机 Windows SDK UnionMetadata，找不到则编译
+      HAVE_WINRT_PDF 关闭版（运行时 UI 给「另存图片」中文引导），不阻断构建。
+    -->
+    <UnionMetadataRoot Condition="Exists('C:\Program Files (x86)\Windows Kits\10\UnionMetadata')">C:\Program Files (x86)\Windows Kits\10\UnionMetadata</UnionMetadataRoot>
+    <WinMdDir Condition="Exists('$(UnionMetadataRoot)\10.0.26100.0\Windows.winmd')">$(UnionMetadataRoot)\10.0.26100.0</WinMdDir>
+    <WinMdDir Condition="$(WinMdDir)=='' And Exists('$(UnionMetadataRoot)\10.0.22621.0\Windows.winmd')">$(UnionMetadataRoot)\10.0.22621.0</WinMdDir>
+    <WinMdDir Condition="$(WinMdDir)=='' And Exists('$(UnionMetadataRoot)\10.0.22000.0\Windows.winmd')">$(UnionMetadataRoot)\10.0.22000.0</WinMdDir>
+    <WinMdDir Condition="$(WinMdDir)=='' And Exists('$(UnionMetadataRoot)\10.0.19041.0\Windows.winmd')">$(UnionMetadataRoot)\10.0.19041.0</WinMdDir>
+    <WinMdDir Condition="$(WinMdDir)=='' And Exists('$(UnionMetadataRoot)\Facade\Windows.winmd')">$(UnionMetadataRoot)\Facade</WinMdDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(WinMdDir)!=''">
+    <DefineConstants>$(DefineConstants);HAVE_WINRT_PDF</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- netDxf（MIT）：DXF R12~2018 读写；DWG 二进制不在内（UI 给转换引导） -->
+    <PackageReference Include="netDxf" Version="3.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用强类型特征树 Schema、领域 Prompt、JSON 解析与调度器/视觉协议 -->
+    <ProjectReference Include="..\SwAiAssistant.Planner\SwAiAssistant.Planner.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Ai\SwAiAssistant.Ai.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(WinMdDir)!=''">
+    <Reference Include="Windows">
+      <HintPath>$(WinMdDir)\Windows.winmd</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- WinRT 托管投影仅随 .NET Framework 运行时分发（GAC），目标包不含；编译期从框架目录取，不复制 -->
+    <Reference Include="System.Runtime.WindowsRuntime">
+      <HintPath>$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Runtime.WindowsRuntime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

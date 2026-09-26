@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+
+  <PropertyGroup>
+    <!-- 全部工程统一 .NET Framework 4.8 / x64（SolidWorks 为 64 位进程） -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>9.0</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+
+    <Company>SwAiAssistant</Company>
+    <Product>SwAiAssistant</Product>
+    <Copyright>Copyright © 2026</Copyright>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+  </PropertyGroup>
+
+  <!--
+    SolidWorks Interop 定位：
+    1) 命令行 -p:SwRedistDir=... 或环境变量 SW_REDIST_DIR 优先；
+    2) 本机 SW2026 默认安装路径兜底；
+    3) 发布打包脚本(pack.ps1)同样读取此属性收集 redist DLL。
+  -->
+  <PropertyGroup>
+    <SwRedistDir Condition="'$(SwRedistDir)' == '' and '$(SW_REDIST_DIR)' != ''">$(SW_REDIST_DIR)</SwRedistDir>
+    <SwRedistDir Condition="'$(SwRedistDir)' == '' and Exists('D:\Program Files\SOLIDWORKS Corp\SOLIDWORKS (2)\api\redist\SolidWorks.Interop.sldworks.dll')">D:\Program Files\SOLIDWORKS Corp\SOLIDWORKS (2)\api\redist</SwRedistDir>
+  </PropertyGroup>
+
+</Project>

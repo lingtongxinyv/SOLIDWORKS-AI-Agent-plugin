@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Cad</RootNamespace>
+    <AssemblyName>SwAiAssistant.Cad</AssemblyName>
+    <Description>唯一触碰 SolidWorks COM 的确定性执行层：草图/特征/查询/快照/工程图/装配</Description>
+  </PropertyGroup>
+
+  <!--
+    SolidWorks 2025/2026 Interop。
+    EmbedInteropTypes=false：SW Interop 类型复杂，不使用 No-PIA 嵌入；
+    Private=false：构建时不复制到本地 bin，发布时由 pack.ps1 从 redist 统一收集。
+  -->
+  <ItemGroup Condition="'$(SwRedistDir)' != '' and Exists('$(SwRedistDir)\SolidWorks.Interop.sldworks.dll')">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>false</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>false</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+    <!-- T18 截图缩放：GDI+（net48 框架自带） -->
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+</Project>

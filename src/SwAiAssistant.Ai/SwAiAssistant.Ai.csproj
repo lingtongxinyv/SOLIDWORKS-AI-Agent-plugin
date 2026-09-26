@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Ai</RootNamespace>
+    <AssemblyName>SwAiAssistant.Ai</AssemblyName>
+    <Description>LLM 调度层：OpenAI 兼容/Ollama 客户端、能力探测、任务调度与降级</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+  </ItemGroup>
+
+</Project>

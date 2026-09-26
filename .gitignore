@@ -1,0 +1,26 @@
+# Visual Studio / MSBuild 构建产物
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+*.vspscc
+*.vssscc
+
+# 构建临时产物
+build/artifacts/
+build/dist/
+*.zip
+
+# 测试结果
+[Tt]est[Rr]esult*/
+TestResults/
+
+# 日志与本地配置（含密钥，绝不入库）
+*.log
+
+# Windows 系统文件
+Thumbs.db
+Desktop.ini

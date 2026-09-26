@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Verify</RootNamespace>
+    <AssemblyName>SwAiAssistant.Verify</AssemblyName>
+    <Description>强校验闭环：理论预算、真实回读对比、视觉复核、偏差报警与重试</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Cad\SwAiAssistant.Cad.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Planner\SwAiAssistant.Planner.csproj" />
+  </ItemGroup>
+
+</Project>

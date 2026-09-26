@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SwAiAssistant.SwIaTest</RootNamespace>
+    <AssemblyName>SwIaTest</AssemblyName>
+    <Description>SolidWorks COM 后台集成测试台（开发工具，不随产品发布）</Description>
+  </PropertyGroup>
+
+  <!-- 开发工具：Interop 直接复制到输出目录，开箱即用 -->
+  <ItemGroup Condition="'$(SwRedistDir)' != '' and Exists('$(SwRedistDir)\SolidWorks.Interop.sldworks.dll')">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>true</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>true</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- TR-25 图纸照片夹具用 GDI+ 绘制 -->
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+    <ProjectReference Include="..\..\src\SwAiAssistant.Cad\SwAiAssistant.Cad.csproj" />
+    <ProjectReference Include="..\..\src\SwAiAssistant.Planner\SwAiAssistant.Planner.csproj" />
+    <ProjectReference Include="..\..\src\SwAiAssistant.Verify\SwAiAssistant.Verify.csproj" />
+    <ProjectReference Include="..\..\src\SwAiAssistant.Reverse\SwAiAssistant.Reverse.csproj" />
+  </ItemGroup>
+
+</Project>

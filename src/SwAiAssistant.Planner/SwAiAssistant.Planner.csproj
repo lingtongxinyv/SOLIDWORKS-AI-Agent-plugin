@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SwAiAssistant.Planner</RootNamespace>
+    <AssemblyName>SwAiAssistant.Planner</AssemblyName>
+    <Description>自然语言 → JSON 特征树：Schema、领域 Prompt、校验与纠正</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwAiAssistant.Core\SwAiAssistant.Core.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Ai\SwAiAssistant.Ai.csproj" />
+    <ProjectReference Include="..\SwAiAssistant.Cad\SwAiAssistant.Cad.csproj" />
+  </ItemGroup>
+
+  <!--
+    分层纪律（review 中-3 修复后口径，等同 FR-4 修订）：
+    Planner 只把 IModelDoc2/IFeature 当作 Cad 服务传入的不透明句柄，
+    严禁直接调用任何 COM API（GetTitle/ForceRebuild3/SelectByID2/EditDelete/FirstFeature 等）；
+    所有 COM 操作必须经 SwAiAssistant.Cad 的服务方法（DocService/FeatureService/QueryService/...），
+    由 Cad 层统一 OnSta 封送与异常包装。IFeature 仅作为 Cad 特征原语的返回句柄透传（如 Rename 入参）。
+    保留 interop 引用仅是为了编译这些句柄类型；新增代码不得扩大直接 COM 调用面。
+  -->
+  <ItemGroup Condition="'$(SwRedistDir)' != '' and Exists('$(SwRedistDir)\SolidWorks.Interop.sldworks.dll')">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>false</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SwRedistDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>false</Private>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+</Project>

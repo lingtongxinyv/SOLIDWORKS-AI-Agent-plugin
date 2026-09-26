@@ -1,0 +1,223 @@
+# SwAiAssistant — SolidWorks AI 辅助建模助手
+
+一个原生嵌入 SolidWorks 2025/2026 的 AI 辅助建模插件。用户用中文自然语言描述零件，AI 输出受 Schema 约束的 **JSON 特征树**，插件以「确定性执行 → 真实回读 → 体积/包围盒强校验 → 失败自动重试」的闭环完成建模；支持对话式修改尺寸/追加/删除特征、确定性数据问答（质量/体积/包围盒/孔数）、GB 材料自动猜材、快照一键回滚，以及 GB 三视图工程图、装配体辅助、DXF/图片图纸半自动反建等扩展能力。
+
+**当前版本：0.2.0（M2）** · 目标：SolidWorks 2025 / 2026，64 位 Windows 10 / 11 · 界面与文档全中文
+
+---
+
+## 目录
+
+- [设计原则与安全红线](#设计原则与安全红线)
+- [功能特性](#功能特性)
+- [已知限制（0.2.0）](#已知限制020)
+- [技术栈](#技术栈)
+- [目录结构](#目录结构)
+- [构建与发布](#构建与发布)
+- [安装与使用](#安装与使用)
+- [开发与测试](#开发与测试)
+- [排障与日志](#排障与日志)
+- [许可证与第三方依赖](#许可证与第三方依赖)
+
+---
+
+## 设计原则与安全红线
+
+- **LLM 只输出 JSON 特征树，绝不执行模型产出的代码**：响应经首个平衡花括号块抽取、剥离 ```json 围栏、JSON 外文本走代码关键字黑名单拒绝，随后 `JObject.Parse` + `FeatureTreeValidator` 强校验；字符串值内含可执行内容标记时记录告警审计，不阻断解析（下游为强类型确定性执行器，无代码执行面）。
+- **确定性执行**：所有 COM 操作集中在单一 Cad 层并经 `StaExecutor` 封送到单 STA 线程；AI/Planner 层不直接调用 COM（仅持有不透明句柄类型）。
+- **强校验闭环**：执行前理论预算 → 执行后真实回读，同时比较体积与包围盒三边（孔数不一致只告警不判负），超阈值弹「采纳 / 回滚 / 让 AI 修复」；执行失败把 SolidWorks 报错回传模型自动修正重试，最多 2 次，且**重试前先回滚到执行前快照**，避免在半成品上重复施加特征。
+- **绿色部署**：便携 ZIP，目标机只需已装 SolidWorks，不需要 Python / Node / WebView2 等额外运行时；不入 GAC，仅 RegAsm `/codebase` + SolidWorks Addins 注册表双写。
+- **密钥安全**：API Key 使用 Windows DPAPI 加密存储在 `%AppData%\SwAiAssistant\`，绝不硬编码；UI 以「前 3 位 + `****` + 后 4 位」掩码显示。
+
+---
+
+## 功能特性
+
+### 核心建模闭环
+
+- **自然语言建模**：对话描述零件 → AI 生成 JSON 特征树 → 计划卡片可改数值 → 确认后确定性执行；可切换「极速模式」直接执行。
+- **草图实体**：中心/角点矩形、圆、圆弧、直槽口、正多边形、自由轮廓（折线）、中心线（旋转轴）；所有几何按给定坐标精确创建。
+- **特征**：拉伸凸台/切除（含贯穿）、旋转凸台/切除、圆角、倒角、孔（优先异型孔向导，失败时自动降级为草图圆切除，支持沉孔）、线性/圆周阵列、镜像、拔模、抽壳、GB 材料赋值。
+- **文档策略**：无活动零件自动新建；有零件弹出「在当前继续 / 新建」二选一；修改与问答始终针对活动文档。
+
+### 对话式修改与数据问答
+
+- **修改**：改尺寸（孔径/板厚等，如「把四个孔改成 φ8」「板厚加到 12」）、追加特征、删除 AI 创建的特征；改尺寸只写驱动尺寸并重建，不整树叠加；每次修改前自动记快照可回滚。
+- **问答**：不经大模型、不臆测，直接回读活动文档真实数据——质量、体积、包围盒、孔数/孔径、特征清单（如「这个零件多重？」「有几个孔？」）。
+
+### GB 材料库
+
+- 16 项常用国标材料（Q235、45、6061、304 等），按名称/别名匹配自动猜材；「材料」页可手动改赋，改后质量按新密度真实回读。
+
+### 强校验与回退
+
+- 体积 + 包围盒三边双判（边长 <1mm 跳过比较），孔数精确比对（不一致仅告警）；校验自身异常默认判失败并建议回滚。
+- 每次 AI 执行/修改前自动记快照，「快照」页可回滚到任一历史状态；回滚前自动再记快照（可反悔）；执行中点「取消」即时中止。
+
+### 多模型管理与调度
+
+- **预设提供商**：「模型配置」对话框内置 30 家 OpenAI 兼容服务商预设（DeepSeek、阿里百炼、智谱、Kimi、火山方舟、百度千帆、腾讯混元、MiniMax、讯飞、阶跃、零一、百川、硅基流动 / OpenAI、Anthropic、Gemini、xAI、Mistral、Groq、OpenRouter、Together、DeepInfra、Fireworks、Cerebras、Perplexity、Cohere、Azure / Ollama、LM Studio、vLLM），选中即自动填 Base URL 与推荐模型名。
+- **连通门槛调度**：调度器**只使用模型列表中已添加且连通测试通过的模型**，绝不自行调用列表外的模型（包括本机 Ollama 也不会被自动拉起）；连通测试失败的模型暂停参与调度，重测通过即恢复；实际调用失败同样回写连通状态并持久化。
+- **模型列表状态**：每条模型显示连通 ✓/✗/未测试 标签与最近测试时间；404 等错误会把服务端响应原文带出来，方便定位「模型名不是合法 API ID」这类问题（如 Kimi 须填 `kimi-k2.6` 而非产品名「Kimi K2.6」）。
+
+### 扩展能力（实验/基础）
+
+- **GB 第一角三视图工程图**：一键生成前/上/左三视图、插入模型尺寸、导出 PDF。
+- **装配体辅助**：插入零件、自动配合（重合/同轴/距离）、一键干涉检查并中文报告。
+- **DXF 反建**：导入矢量图纸解析轮廓，AI 生成计划，**强制人工确认**后建模。
+- **图片/PDF 反建**：视觉模型识别视图与尺寸，**强制人工确认**，未确认不建模；界面明确标注实验性质。
+
+---
+
+## 已知限制（0.2.0）
+
+以下为本版本不自动完成或实验性的能力，**请勿在生产中依赖**：
+
+- 草图几何约束与尺寸标注：Schema 接受声明，但执行器**不自动施加**，会在执行报告中提示，需在 SolidWorks 中手工补充。
+- 螺纹孔：计划支持 `threaded` / `threadSpec` 声明，本版本**只按攻丝底孔直径创建光孔**，不攻丝、不添加螺纹装饰线，执行报告会明确提示需手工补螺纹。
+- 筋板（rib）：实验能力，部分草图策略下可能失败，建议用小矩形凸台替代。
+- 含圆弧轮廓的理论体积为近似预算，强校验会标注「含估算」。
+- 真实复杂工程图（多视图标注齐全的生产图纸）的反建未做代表性验证。
+- 非中文界面环境下，问答中的孔数统计可能漏统（孔数仅用于告警，不影响判定）。
+
+---
+
+## 技术栈
+
+| 层 | 说明 |
+|---|---|
+| 插件宿主 | C# / .NET Framework 4.8 / x64 / COM Add-in / WPF 任务面板 |
+| 自动化通道 | SolidWorks COM（`SldWorks.Application`），全程 STA |
+| AI 客户端 | OpenAI 兼容协议 + Ollama 协议；能力自动探测 + 连通门槛调度（仅调用列表内已添加且连通测试通过的模型） |
+| 规划 | 领域系统提示词 → JSON 特征树 → Schema 强校验 |
+| 校验 | 理论预算器 vs 真实回读；视觉复核（可选） |
+| 反建 | netDxf（DXF 解析）+ 视觉模型（图片/PDF） |
+| 依赖 | Newtonsoft.Json、netDxf（均 MIT） |
+
+---
+
+## 目录结构
+
+```
+SwAiAssistant/
+├── src/
+│   ├── SwAiAssistant.Core/        # 共享内核：配置(DPAPI)、日志、JSON、StaExecutor、HTTP 工厂
+│   ├── SwAiAssistant.Cad/         # 唯一 COM 层：会话/文档/草图/特征/查询/工程图/装配/材料/截图
+│   ├── SwAiAssistant.Ai/          # AI 客户端：模型配置、能力探测、调度器、Ollama 管理、视觉
+│   ├── SwAiAssistant.Planner/     # 规划：JSON 解析+校验、特征树 Schema、执行器、对话修改/问答/快照
+│   ├── SwAiAssistant.Verify/      # 强校验：理论预算器、回读比对、校验报告
+│   ├── SwAiAssistant.Reverse/     # 反建：DXF 解析、图片/PDF 反建规划
+│   └── SwAiAssistant.AddIn/       # 插件宿主：Ribbon、WPF 任务面板、SwAddIn 入口、COM 注册
+├── tools/
+│   ├── Tests/                     # 单元测试（Core / Ai / Planner）
+│   ├── SwIaTest/                  # 集成测试台（COM 自动化驱动 SolidWorks，开发工具，不随包发布）
+│   └── SwBench/                   # 基准评测台（10 件 rubric，开发工具，不随包发布）
+├── build/                         # build.ps1 / pack.ps1 与打包产物
+├── install/                       # 安装/卸载脚本与 release-notes.txt（发布时复制到 ZIP）
+└── .trae/specs/sw-ai-assistant/   # 需求规格、任务清单、独立评审报告
+```
+
+---
+
+## 构建与发布
+
+> 构建机需安装：Visual Studio 2022/2026 Build Tools（含 MSBuild + .NET Framework 4.8 目标包）、SolidWorks 2025/2026（其 `api\redist` 提供 Interop）。
+
+```powershell
+# 构建所有项目（AddIn → SwIaTest → SwBench），x64 Release
+powershell -ExecutionPolicy Bypass -File build\build.ps1
+
+# 构建并运行全部单元测试（Core / Ai / Planner）
+powershell -ExecutionPolicy Bypass -File build\build.ps1 -RunTests
+```
+
+构建脚本通过 vswhere 自动定位 MSBuild，并在以下位置查找 SolidWorks Interop（可用 `SW_REDIST_DIR` 环境变量覆盖）：
+
+- `D:\Program Files\SOLIDWORKS Corp\SOLIDWORKS (2)\api\redist`
+- `C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS 2026\api\redist`
+- `C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS 2025\api\redist`
+
+### 打包发布
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build\pack.ps1 -Version 0.2.0
+```
+
+产物位于 `build\artifacts\SwAiAssistant-0.2.0.zip`，包含：插件 7 个 DLL、PDB、3 个 SolidWorks Interop、Newtonsoft.Json.dll、netDxf.dll、`安装.bat` / `卸载.bat`、`release-notes.txt`。
+
+---
+
+## 安装与使用
+
+1. 关闭 SolidWorks。
+2. 解压 ZIP 到任意目录（保持所有文件在同一文件夹）。
+3. 右键 `安装.bat` → **以管理员身份运行**（脚本自检管理员权限并自动定位 64 位 RegAsm；出现 `RA0000 /codebase` 警告属正常现象）。
+4. 启动 SolidWorks，功能区出现「AI 助手」标签页，右侧自动打开任务面板。
+5. 配置 AI 模型：
+   - **云端**：「设置」页 → 添加模型，从「预设提供商」下拉选择服务商（自动填 Base URL 与推荐模型名，也可手填任意 OpenAI 兼容端点），填 API Key，点**「连通测试」**确认通过。
+   - **本机 Ollama**：安装并启动 Ollama 服务，在「设置」页底部点「刷新」「拉取推荐模型」，对添加的本地模型同样点「连通测试」。
+   - 注意：只有连通测试通过的模型才会被调用；失败的模型会显示「连通✗」并在重新测试通过后恢复。
+6. 在「对话」页用中文描述零件，确认计划后执行。
+
+卸载：右键 `卸载.bat` → 以管理员身份运行；配置与日志保留在 `%AppData%\SwAiAssistant\`，如需彻底清除请手动删除该目录。
+
+---
+
+## 开发与测试
+
+### 单元测试
+
+`build.ps1 -RunTests` 会运行 Core / Ai / Planner 三组 x64 单元测试（共 67 项）。
+
+### 集成测试（SwIaTest）
+
+`tools\SwIaTest` 是 COM 自动化测试台，启动后台 SolidWorks 驱动建模、修改、快照、工程图、装配、DXF/图片反建等回归用例。**需在 SolidWorks 已安装的机器上运行**：
+
+```powershell
+# 全量回归
+& tools\SwIaTest\bin\x64\Release\SwIaTest.exe
+
+# 单分支
+& tools\SwIaTest\bin\x64\Release\SwIaTest.exe --tr22   # 工程图
+& tools\SwIaTest\bin\x64\Release\SwIaTest.exe --tr23   # 装配体
+& tools\SwIaTest\bin\x64\Release\SwIaTest.exe --tr24   # DXF 反建
+& tools\SwIaTest\bin\x64\Release\SwIaTest.exe --tr25   # 图片/PDF 反建
+```
+
+退出码 0 表示全部通过。测试台只回收其自身启动并标记的 SolidWorks 实例，不杀任何现有进程。
+
+### 基准评测（SwBench）
+
+`tools\SwBench` 以 10 个标准测试件跑端到端 rubric，产出一次通过率、修复轮次、体积/包围盒偏差等汇总。支持云端模型与本地 Ollama 两轮。
+
+---
+
+## 排障与日志
+
+| 现象 | 处理 |
+|---|---|
+| 插件未出现 | 确认已以管理员运行 `安装.bat`；在功能区标签条右键勾选「AI 助手」；查看日志 |
+| 注册找不到 DLL | 确认解压目录内 `SwAiAssistant.AddIn.dll` 与 `SolidWorks.Interop.*.dll` 在同一文件夹 |
+| 「没有可用模型」 | 调度只使用列表内连通测试通过的模型：到「设置」页添加模型并点「连通测试」；失败的模型重测通过即恢复 |
+| 连通测试 404 | Base URL 路径或模型名不对：模型名须用 API 模型 ID（如 Kimi 填 `kimi-k2.6`，不是产品名「Kimi K2.6」）；错误提示会带服务端原文 |
+| 「响应读取中断/读取操作失败」 | 多为请求超时：思考型模型响应慢，到「设置」页把「请求超时」调大（如 300 秒）后重试，或换响应更快的模型 |
+| 「SolidWorks 正忙」 | 关闭 SolidWorks 中所有弹出对话框后重试 |
+| 建模偏差超限报警 | 选「让 AI 修复」会把错误回传模型自动修正；也可选「回滚」或「采纳」 |
+| 反馈问题 | 面板「日志」页 →「导出日志 ZIP」，随问题描述提交（可先脱敏） |
+
+- 配置目录：`%AppData%\SwAiAssistant\config\app.json`
+- 日志目录：`%AppData%\SwAiAssistant\logs\app-yyyyMMdd.log`
+- 环境豁免：僵尸 `SLDWORKS.exe`（如 PID 47400）与 VBA 首次启动模态窗可能导致测试台「无残留」断言间歇失败，属环境首启现象，不影响产品功能。
+
+---
+
+## 许可证与第三方依赖
+
+- 本项目自身代码：以 [MIT License](LICENSE) 开源（`Copyright (c) 2026 lingtongxinyv`）。
+- 第三方依赖（随包分发）：
+  - [Newtonsoft.Json](https://www.newtonsoft.com/json) — MIT
+  - [netDxf](https://github.com/haplokuon/netDxf) — MIT
+- SolidWorks Interop DLL 随包复制仅用于 COM 互操作，版权归 Dassault Systèmes；构建插件需要本机已安装 SolidWorks，但本仓库源码不包含也不分发 SolidWorks 专有软件。
+- 欢迎提 Issue / PR；提交前请运行 `build.ps1 -RunTests` 确认 67 项单元测试全部通过。
+
+详细需求、任务进度与独立评审记录见 `.trae/specs/sw-ai-assistant/`（spec.md / tasks.md / review.md）。

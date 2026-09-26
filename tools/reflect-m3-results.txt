@@ -1,0 +1,144 @@
+SW2026 Interop 反射实测结果（M3-M9 开发备查，2026-09-26 实机反射）
+=====================================================================
+来源：D:\Program Files\SOLIDWORKS Corp\SOLIDWORKS (2)\api\redist
+工具：tools/reflect-api.ps1（修改 Show-Type/Show-Enum/Show-Props 行即可扩展）
+
+【草图创建 ISketchManager】
+CreatePolygon(Double XC,YC,Zc, Xp,Yp,Zp, Int32 Sides, Boolean Inscribed) -> Object
+  ※ Inscribed=true = 顶点在外接圆上（即"外接圆多边形"）；Xp,Yp 为圆上一点（起始顶点）
+CreateLine(Double X1,Y1,Z1, X2,Y2,Z2) -> SketchSegment
+CreateCenterLine(Double X1,Y1,Z1, X2,Y2,Z2) -> SketchSegment   ※ 旋转轴用
+CreateArc(Double XC,YC,Zc, X1,Y1,Z1, X2,Y2,Z2, Int16 Direction) -> SketchSegment
+  ※ 圆心+起点+终点+方向（±1，+Z 视角 1=逆时针）
+Create3PointArc(Double X1,Y1,Z1, X2,Y2,Z2, X3,Y3,Z3) -> SketchSegment
+CreateSketchSlot(Int32 SlotCreationType, Int32 SlotLengthType, Double Width,
+  Double X1,Y1,Z1, X2,Y2,Z2, X3,Y3,Z3, Int32 CenterArcDirection, Boolean AddDimension) -> SketchSlot
+  swSketchSlotCreationType_e: line=0(轴两端点) center_line=1(中心点+轴端点) arc=2 3pointarc=3
+  swSketchSlotLengthType_e: CenterCenter=0(轴长=两圆心距) FullLength=1
+  ※ 推荐 line=0 + CenterCenter=0：X1Y1/X2Y2=两圆心，X3Y3=宽度侧点，Width=槽宽(米)，AddDimension=false
+  ※ 总长 L、宽 W、中心角 θ：圆心距=L-W，端点=C±((L-W)/2)(cosθ,sinθ)
+
+【约束 IModelDoc2】
+SketchAddConstraints(String IdStr) -> Void   ※ 作用于当前选择集（草图段/点）
+  IdStr: sgCOINCIDENT sgCONCENTRIC sgCOLINEAR sgHORIZONTAL sgVERTICAL sgSAMELENGTH(相等)
+         sgTANGENT sgPERPENDICULAR sgPARALLEL sgFIXED sgATMIDDLE sgSYMMETRIC sgCORADIAL
+         sgHORIZONTALPOINTS sgVERTICALPOINTS sgMERGEPOINTS sgATPIERCE
+SketchConstraintsDel(Int32 ConstrInd, String IdStr) / SketchConstraintsDelAll()
+
+【尺寸 IModelDoc2】（创建前必须 SetUserPreferenceToggle(swInputDimValOnCreate,false) 防弹窗）
+IAddDimension2(x,y,z) / IAddHorizontalDimension2 / IAddVerticalDimension2 / IAddRadialDimension2 / IAddDiameterDimension2
+  -> DisplayDimension；GetDimension2(0)->IDimension
+  ※ 两直线选中时 IAddDimension2 产生角度尺寸；IAddRadialDimension2=半径
+IDimension: Value 非米（随文档单位）；SystemValue 才是 MKS 米（读写）
+  SetSystemValue3(Double NewValue, Int32 WhichConfigurations, Object Config_names) -> Int32
+
+【草图回读 ISketch / ISketchSegment】
+GetSketchSegments()->Object[]  GetSketchPoints/GetSketchPointsCount  GetSketchSlotCount/GetSketchSlots
+ISketchSegment.GetType()->Int32: swSketchLINE=0 swSketchARC=1 swSketchELLIPSE=2 swSketchSPLINE=3
+ISketchSegment.GetLength()->Double(米)
+
+【圆角 IFeatureManager】
+FeatureFillet3(Int32 Options, Double R1, Double R2, Double Rho, Int32 Ftyp, Int32 OverflowType,
+  Int32 ConicRhoType, Object Radii, Object Dist2Arr, Object RhoArr, Object SetBackDistances,
+  Object PointRadiusArray, Object PointDist2Array, Object PointRhoArray) -> Object(通常null,特征经特征树查)
+  swFeatureFilletType_e: Simple=0 VariableRadius=1 Face=2 FullRound=3
+  swFeatureFilletOptions_e: Propagate=1 UniformRadius=2 ...（简单等半径：Options=1|2=3）
+  swFilletOverFlowType_e: Default=0
+  ※ 用法：选中边集 → Options=3, R1=R(米), Ftyp=0, OverflowType=0, ConicRhoType=0,
+    Radii=object[]{R米}, 其余数组=new object[0]
+
+【倒角 IFeatureManager】
+InsertFeatureChamfer(Int32 Options, Int32 ChamferType, Double Width, Double Angle,
+  Double OtherDist, Double VertexChamDist1..3) -> Feature
+  swChamferType_e: AngleDistance=1 DistanceDistance=2 Vertex=3 EqualDistance=16
+  ※ 等距 C：Type=2, Width=OtherDist=d(米), Angle=45°弧度；Options=0
+
+【简单直孔 IFeatureManager】（降级路径主力仍是草图圆+拉伸切除）
+SimpleHole2(Double Dia米, Sd, Flip, Dir, T1, T2, D1, D2, Dchk1..2, Ddir1..2, Dang1..2,
+  OffsetReverse1..2, TranslateSurface1..2, UseFeatScope, UseAutoSelect,
+  AssemblyFeatureScope, AutoSelectComponents, PropagateFeatureToParts) -> Feature
+  ※ 需预选平面+点，实际项目用草图圆+FeatureCut4 降级路径更可控
+
+【异型孔向导 IFeatureManager】（尝试路径，失败降级）
+HoleWizard5(Int32 GenericHoleType, Int32 StandardIndex, Int32 FastenerTypeIndex, String SSize,
+  Int16 EndType, Double Diameter米, Double Depth米, Double Length, Double Value1..12,
+  String ThreadClass, Boolean RevDir, FeatureScope, AutoSelect, AssemblyFeatureScope,
+  AutoSelectComponents, PropagateFeatureToParts) -> Feature
+  swWzdGeneralHoleTypes_e: CounterBore=0 CounterSink=1 Hole=2 Tap=4
+  swWzdHoleStandards_e: GB=13 ISO=8 AnsiMetric=1
+  swWzdHoleStandardFastenerTypes_e(GB): GBDrillSizes=355 GBScrewClearances=356
+    GBTappedHole=359 GBHexagonSocketHeadCapScrews=361 GBHexagonHeadBoltsGB=376
+  swWzdHoleScrewClearanceTypes_e: Close=0 Normal=1 Loose=2
+  ※ 依赖 Toolbox 数据库（目标机可能未装）；调用前选中平面，异常/null→降级"草图圆+拉伸切除"
+    并在 ExecutionReport.Notes 标注"异型孔向导不可用，已降级为草图切除"
+
+【阵列 IFeatureManager】（选择 Mark：种子特征=4，方向1=1，方向2=2）
+FeatureLinearPattern2(Int32 Num1, Double Spacing1米, Int32 Num2, Double Spacing2,
+  Boolean FlipDir1, Boolean FlipDir2, String DName1, String DName2, Boolean GeometryPattern) -> Feature
+  ※ DName 传 "" 改用预选方向边（SelectByID2 "","EDGE",x,y,z,append,Mark=1）
+FeatureCircularPattern4(Int32 Number, Double Spacing弧度, Boolean FlipDirection, String DName,
+  Boolean GeometryPattern, Boolean EqualSpacing, Boolean VaryInstance) -> Feature
+  ※ EqualSpacing=true 时 Spacing=总张角（360°均布=2π）；轴=预选圆柱面/圆边(Mark=1)
+
+【镜像 IFeatureManager】（选择 Mark：镜像面=1，被镜像特征=2）
+InsertMirrorFeature2(Boolean BMirrorBody, Boolean BGeometryPattern, Boolean BMerge,
+  Boolean BKnit, Int32 ScopeOptions) -> Feature
+  ※ 特征镜像：BMirrorBody=false BGeometryPattern=false BMerge=true BKnit=false ScopeOptions=0
+
+【旋转 IFeatureManager】
+FeatureRevolve2(Boolean SingleDir, Boolean IsSolid, Boolean IsThin, Boolean IsCut,
+  Boolean ReverseDir, Boolean BothDirectionUpToSameEntity, Int32 Dir1Type, Int32 Dir2Type,
+  Double Dir1Angle弧度, Double Dir2Angle, Boolean OffsetReverse1/2, Double OffsetDistance1/2,
+  Int32 ThinType, Double ThinThickness1/2, Boolean Merge, Boolean UseFeatScope, Boolean UseAutoSelect) -> Feature
+  ※ 选中含中心线的草图(SelectByID2 "SKETCH")，中心线自动作轴；Dir1Type=0(blind)
+FeatureRevolveCut2(Double Angle, Boolean ReverseDir, Double Angle2, Int32 RevType, Int32 Options,
+  Boolean UseFeatScope, Boolean UseAutoSelect, Boolean AssemblyFeatureScope,
+  Boolean AutoSelectComponents, Boolean PropagateFeatureToParts) -> Feature
+
+【筋 IFeatureManager】
+InsertRib(Boolean Is2Sided, Boolean ReverseThicknessDir, Double Thickness米,
+  Int32 ReferenceEdgeIndex, Boolean ReverseMaterialDir, Boolean IsDrafted,
+  Boolean DraftOutward, Double DraftAngle, Boolean IsNormToSketch, Boolean IsDraftedFromWall) -> Void
+  ※ 选中开轮廓草图；材料方向失败时用 ReverseMaterialDir=true 重试一次
+
+【拔模 IFeatureManager】（选择 Mark：中性面=1，拔模面=2）
+InsertMultiFaceDraft(Double Angle弧度, Boolean FlipDir, Boolean EdgeDraft,
+  Int32 PropType, Boolean IsStepDraft, Boolean IsBodyDraft) -> Feature
+
+【抽壳 IModelDoc2】（预选要移除的面，Mark=0）
+InsertFeatureShell(Double Thickness米, Boolean Outward) -> Void
+  ※ 返回 void，抽壳特征经"前后特征名差集"或 GetLatestFeatureByTypeName("Shell") 取得
+
+【几何语义选择器原料】
+IBody2.GetFaces()->object[]  GetEdges()->object[]  GetFaceCount/GetEdgeCount
+IFace2.GetSurface()->ISurface；ISurface.IsPlane()/IsCylinder()
+  PlaneParams(object->double[6]: RootX,Y,Z,NormalX,Y,Z)
+  CylinderParams(object->double[7]: CenterX,Y,Z,AxisX,Y,Z,Radius)
+  IFace2.GetBox()->double[6]米；GetArea()->double
+IEdge.GetCurve()->ICurve；ICurve.LineParams(object->double[7]: RootX,Y,Z,DirX,Y,Z[,?])
+  CircleParams(object->double[]: CenterX,Y,Z,AxisX,Y,Z,Radius)
+  IEdge.GetStartVertex/GetEndVertex->IVertex.GetPoint()->double[3]米（MathPoint 需转型，直接 double[] 即可）
+IEntity.Select4(Boolean Append, SelectData null)  ※ IEdge/IFace2 均可转 IEntity
+
+【选择】
+IModelDocExtension.SelectByID2(Name, Type, X,Y,Z米, Append, Mark, Callout null, SelectOption 0) -> Boolean
+  Type: "PLANE" "SKETCH" "BODYFEATURE"(特征) "EDGE" "FACE" "AXIS" "DIMENSION"
+  ※ Name="" + 坐标时选最近实体（EDGE/FACE 可按包围盒方位点选）
+ISelectionMgr: GetSelectedObjectCount2(Mark) / GetSelectedObjectType3(Index,Mark) / GetSelectedObject6(Index,Mark)
+IModelDoc2.ClearSelection2(Boolean Append)
+swSelectType_e: EDGES=1 FACES=2 SKETCHES=9 BODYFEATURES=22 DATUMPLANES=4 DIMENSIONS=14
+IFeature.GetTypeName2() 常用值: "ProfileFeature"(草图) "Extrusion"(拉伸) "Cut"(切除)
+  "Fillet" "Chamfer" "LocalPattern"/"LPattern" "CirPattern" "Mirror" "Revolve" "Rib" "Draft" "Shell"
+
+【已知坑位（M0-M2 沉淀，全里程碑有效）】
+1. swCreateCommandGroupErrors: 1=成功 0=失败（反直觉）
+2. IModelDoc2 无 FeatureByName 方法——用 FirstFeature/GetNextFeature 枚举按名查找
+3. 拉伸/切除基于选择集：AddToDB 退出草图后选择集清空，必须 SelectByID2(name,"SKETCH") 重选
+4. IAddXxxDimension2 前必须 swInputDimValOnCreate=false 否则弹输入框永久阻塞
+5. IDimension.Value 非米，SystemValue 才是 MKS 米
+6. 接管模式 SW 长期持有已保存文件句柄：测试件用唯一时间戳文件名；SaveAs4 会切换活动文档
+7. bat 必须 GBK+CRLF；ps1 含中文时若被 cmd/PowerShell 以 GBK 误读会解析错乱
+   → 工具 ps1 一律纯 ASCII（中文注释也不行，奇数字节会吞掉下一行）
+8. 沙箱 toolhost 会对命令行中的 $ 变量插值：长反射脚本只走 powershell -File 纯 ASCII 文件
+9. SwIaTest 运行需 dangerouslyDisableSandbox（Cad 层日志写 %AppData%\SwAiAssistant\logs）
+10. COM 全调用必须经 SwSession.OnSta 封送（StaExecutor 单 STA 线程）

@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SwAiAssistant.AddIn/SwAiAssistant.AddIn.csproj" />
+    <Project Path="src/SwAiAssistant.Ai/SwAiAssistant.Ai.csproj" />
+    <Project Path="src/SwAiAssistant.Cad/SwAiAssistant.Cad.csproj" />
+    <Project Path="src/SwAiAssistant.Core/SwAiAssistant.Core.csproj" />
+    <Project Path="src/SwAiAssistant.Planner/SwAiAssistant.Planner.csproj" />
+    <Project Path="src/SwAiAssistant.Reverse/SwAiAssistant.Reverse.csproj" />
+    <Project Path="src/SwAiAssistant.Verify/SwAiAssistant.Verify.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/SwIaTest/SwIaTest.csproj" />
+  </Folder>
+  <Folder Name="/tools/Tests/">
+    <Project Path="tools/Tests/SwAiAssistant.Core.Tests/SwAiAssistant.Core.Tests.csproj" />
+  </Folder>
+</Solution>
