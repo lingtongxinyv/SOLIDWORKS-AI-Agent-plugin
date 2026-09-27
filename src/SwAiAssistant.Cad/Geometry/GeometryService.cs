@@ -212,44 +212,23 @@ namespace SwAiAssistant.Cad.Geometry
         }
 
         /// <summary>
-        /// 选中圆周阵列旋转轴：轴线平行 Z 的圆柱面（半径最大者——主回转体，
-        /// 避免误选孔的小圆柱面）；兜底选半径最大的圆边。返回是否选中。
+        /// 选中圆周阵列旋转轴：轴线平行 axisDir（x/y/z，null=不限轴向）的圆柱面
+        /// （半径最大者——主回转体，避免误选孔的小圆柱面）；兜底选半径最大的圆边；
+        /// 指定轴向仍无命中时退化为任意轴向半径最大者。返回是否选中。
         /// </summary>
-        public bool SelectCircularAxis(IModelDoc2 doc, bool append = false, int mark = 0)
+        public bool SelectCircularAxis(IModelDoc2 doc, string axisDir = null, bool append = false, int mark = 0)
         {
             if (doc == null) throw new ArgumentNullException(nameof(doc));
             return _session.OnSta(() =>
             {
                 try
                 {
-                    IEntity best = null;
-                    double bestRadius = -1;
-                    foreach (IBody2 b in GetSolidBodies(doc))
+                    double[] dir = AxisVector(axisDir);
+                    IEntity best = FindAxisEntity(doc, dir);
+                    if (best == null && dir != null)
                     {
-                        if (!(b.GetFaces() is object[] fs)) continue;
-                        foreach (object o in fs)
-                        {
-                            if (!(o is IFace2 f)) continue;
-                            if (!(f.GetSurface() is ISurface surf) || !surf.IsCylinder()) continue;
-                            // CylinderParams: CenterX,Y,Z,AxisX,Y,Z,Radius
-                            if (!(surf.CylinderParams is double[] p) || p.Length < 7) continue;
-                            if (Math.Abs(p[5]) < ParallelToZThreshold) continue;
-                            if (p[6] > bestRadius) { bestRadius = p[6]; best = (IEntity)f; }
-                        }
-                    }
-                    if (best == null)
-                    {
-                        foreach (IBody2 b in GetSolidBodies(doc))
-                        {
-                            if (!(b.GetEdges() is object[] es)) continue;
-                            foreach (object o in es)
-                            {
-                                if (!(o is IEdge e) || !(e.GetCurve() is ICurve c)) continue;
-                                if (!(c.CircleParams is double[] p) || p.Length < 7) continue;
-                                if (Math.Abs(p[5]) < ParallelToZThreshold) continue;
-                                if (p[6] > bestRadius) { bestRadius = p[6]; best = (IEntity)e; }
-                            }
-                        }
+                        Log.Warn("Cad", $"旋转轴未找到平行 {axisDir.ToUpperInvariant()} 轴的圆柱面/圆边，退化为任意轴向半径最大者。");
+                        best = FindAxisEntity(doc, null);
                     }
                     if (best == null) return false;
                     if (!append) doc.ClearSelection2(true);
@@ -258,6 +237,62 @@ namespace SwAiAssistant.Cad.Geometry
                 catch (CadException) { throw; }
                 catch (Exception ex) { throw CadException.FromCom("选择旋转轴", ex); }
             });
+        }
+
+        /// <summary>轴向字符串转单位向量（x/y/z；未知/null 返回 null 表示不限轴向）。</summary>
+        private static double[] AxisVector(string axisDir)
+        {
+            switch ((axisDir ?? "").ToLowerInvariant())
+            {
+                case "x": return new double[] { 1, 0, 0 };
+                case "y": return new double[] { 0, 1, 0 };
+                case "z": return new double[] { 0, 0, 1 };
+                default: return null;
+            }
+        }
+
+        /// <summary>轴向 (ax,ay,az) 是否与 dir 平行（|点积| ≥ 0.9）；dir=null 恒真。</summary>
+        private static bool AxisParallel(double[] dir, double ax, double ay, double az)
+        {
+            if (dir == null) return true;
+            double dot = dir[0] * ax + dir[1] * ay + dir[2] * az;
+            return Math.Abs(dot) >= ParallelToZThreshold;
+        }
+
+        /// <summary>
+        /// 找旋转轴实体：优先圆柱面（面轴向与 dir 平行），其次圆边；各自取半径最大者。
+        /// dir=null 时不限轴向。找不到返回 null。
+        /// </summary>
+        private IEntity FindAxisEntity(IModelDoc2 doc, double[] dir)
+        {
+            IEntity best = null;
+            double bestRadius = -1;
+            foreach (IBody2 b in GetSolidBodies(doc))
+            {
+                if (!(b.GetFaces() is object[] fs)) continue;
+                foreach (object o in fs)
+                {
+                    if (!(o is IFace2 f)) continue;
+                    if (!(f.GetSurface() is ISurface surf) || !surf.IsCylinder()) continue;
+                    // CylinderParams: CenterX,Y,Z,AxisX,Y,Z,Radius
+                    if (!(surf.CylinderParams is double[] p) || p.Length < 7) continue;
+                    if (!AxisParallel(dir, p[3], p[4], p[5])) continue;
+                    if (p[6] > bestRadius) { bestRadius = p[6]; best = (IEntity)f; }
+                }
+            }
+            if (best != null) return best;
+            foreach (IBody2 b in GetSolidBodies(doc))
+            {
+                if (!(b.GetEdges() is object[] es)) continue;
+                foreach (object o in es)
+                {
+                    if (!(o is IEdge e) || !(e.GetCurve() is ICurve c)) continue;
+                    if (!(c.CircleParams is double[] p) || p.Length < 7) continue;
+                    if (!AxisParallel(dir, p[3], p[4], p[5])) continue;
+                    if (p[6] > bestRadius) { bestRadius = p[6]; best = (IEntity)e; }
+                }
+            }
+            return best;
         }
 
         /// <summary>侧立面清单：法向水平（|normalZ| &lt; 0.1）的平面面（拔模面候选）。</summary>

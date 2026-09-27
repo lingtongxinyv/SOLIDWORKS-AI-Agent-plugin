@@ -45,6 +45,86 @@ namespace SwAiAssistant.Cad.Drawings
         public List<DrawingViewInfo> Views { get; set; } = new List<DrawingViewInfo>();
     }
 
+    /// <summary>工程图单个尺寸的提取结果（POCO，不暴露 COM）。</summary>
+    public sealed class DrawingDimensionExtract
+    {
+        /// <summary>尺寸全名（如 "D1@草图1"）。</summary>
+        public string FullName { get; set; } = "";
+
+        /// <summary>尺寸种类：linear / diameter / radial / angular / chamfer / ordinate / arclength / scalar / other。</summary>
+        public string Kind { get; set; } = "";
+
+        /// <summary>尺寸值（毫米；角度为度）。</summary>
+        public double ValueMm { get; set; }
+
+        /// <summary>尺寸前缀文本（如 "⌀"、"R"、"M"，可能为空）。</summary>
+        public string Prefix { get; set; } = "";
+
+        /// <summary>尺寸后缀文本（可能为空）。</summary>
+        public string Suffix { get; set; } = "";
+    }
+
+    /// <summary>工程图视图中可见圆边的提取结果（模型空间坐标，POCO）。</summary>
+    public sealed class DrawingCircleExtract
+    {
+        public double CenterXMm { get; set; }
+        public double CenterYMm { get; set; }
+        public double CenterZMm { get; set; }
+        /// <summary>圆所在平面的轴向单位向量。</summary>
+        public double AxisX { get; set; }
+        public double AxisY { get; set; }
+        public double AxisZ { get; set; }
+        public double RadiusMm { get; set; }
+    }
+
+    /// <summary>工程图单个模型视图的提取结果（POCO）。</summary>
+    public sealed class DrawingViewExtract
+    {
+        public string Name { get; set; } = "";
+
+        /// <summary>标准视图方向名（如 "*前视"；投影视图为空）。</summary>
+        public string Orientation { get; set; } = "";
+
+        /// <summary>IView.Type：1=图纸伪视图，4=投影视图，7=命名模型视图。</summary>
+        public int ViewType { get; set; }
+
+        public double PosXMm { get; set; }
+        public double PosYMm { get; set; }
+        public double Scale { get; set; }
+
+        /// <summary>视图轮廓在模型空间的宽/高（毫米；轮廓框 ÷ 视图比例反算）。</summary>
+        public double OutlineWModelMm { get; set; }
+        public double OutlineHModelMm { get; set; }
+
+        /// <summary>视图引用的模型文件磁盘路径（可能为空/文件已不存在）。</summary>
+        public string ReferencedModelPath { get; set; } = "";
+
+        /// <summary>引用模型当前是否已加载。</summary>
+        public bool ModelLoaded { get; set; }
+
+        public List<DrawingDimensionExtract> Dimensions { get; set; } = new List<DrawingDimensionExtract>();
+
+        /// <summary>视图内可见圆边（模型空间坐标；用于孔位/凸台/回转体的确定性定位）。</summary>
+        public List<DrawingCircleExtract> Circles { get; set; } = new List<DrawingCircleExtract>();
+    }
+
+    /// <summary>工程图单张图纸的提取结果（POCO）。</summary>
+    public sealed class DrawingSheetExtract
+    {
+        public string Name { get; set; } = "";
+        public double WidthMm { get; set; }
+        public double HeightMm { get; set; }
+        public List<DrawingViewExtract> Views { get; set; } = new List<DrawingViewExtract>();
+    }
+
+    /// <summary>整张工程图的确定性提取结果（POCO，供反建规划器使用）。</summary>
+    public sealed class DrawingExtract
+    {
+        public string Title { get; set; } = "";
+        public string FilePath { get; set; } = "";
+        public List<DrawingSheetExtract> Sheets { get; set; } = new List<DrawingSheetExtract>();
+    }
+
     /// <summary>
     /// GB 第一角三视图工程图服务（M6-T22）：
     /// 模板自动发现（gb_a3 优先）→ 一键第一角三视图（Create1stAngleViews2，调色板预刷新）→
@@ -135,6 +215,84 @@ namespace SwAiAssistant.Cad.Drawings
                 var drw = drawing as IDrawingDoc;
                 if (drw == null) throw new CadException("文档不是工程图。");
                 return CountViewDimensions(EnumModelViews(drw));
+            });
+        }
+
+        /// <summary>
+        /// 工程图确定性提取（按图反建数据源）：逐图纸枚举模型视图，提取视图方向/比例/
+        /// 模型空间轮廓尺寸/引用模型路径 + 视图内全部尺寸（类型/前缀/值）。
+        /// 逐视图、逐尺寸失败仅记日志不中断；提取后还原原活动图纸。
+        /// </summary>
+        public DrawingExtract ExtractDrawing(IModelDoc2 drawing)
+        {
+            if (drawing == null) throw new ArgumentNullException(nameof(drawing));
+            return _session.OnSta(() =>
+            {
+                var drw = drawing as IDrawingDoc;
+                if (drw == null) throw new CadException("文档不是工程图。");
+
+                var extract = new DrawingExtract
+                {
+                    Title = SafeTitle(drawing),
+                    FilePath = SafePath(drawing)
+                };
+
+                object snObj = null;
+                try { snObj = drw.GetSheetNames(); } catch { }
+                string[] sheetNames = snObj is string[] sn
+                    ? sn
+                    : (snObj is object[] oa ? oa.OfType<string>().ToArray() : new string[0]);
+
+                string activeSheet = null;
+                try { activeSheet = (drw.IGetCurrentSheet() as ISheet)?.GetName(); } catch { }
+
+                foreach (string sheetName in sheetNames)
+                {
+                    var se = new DrawingSheetExtract { Name = sheetName };
+                    try
+                    {
+                        drw.ActivateSheet(sheetName);
+                        ISheet sheet = drw.IGetCurrentSheet() as ISheet;
+                        if (sheet != null)
+                        {
+                            double pw = 0, ph = 0;
+                            sheet.GetSize(ref pw, ref ph);
+                            se.WidthMm = pw * 1000;
+                            se.HeightMm = ph * 1000;
+
+                            object viewsObj = sheet.GetViews();
+                            if (viewsObj is object[] viewRows)
+                            {
+                                foreach (object row in viewRows)
+                                {
+                                    // ISheet.GetViews 一般直接返回视图数组；兼容二维嵌套返回
+                                    if (row is IView single) AddView(se, single);
+                                    else if (row is object[] nested)
+                                    {
+                                        foreach (object vo in nested)
+                                        {
+                                            if (vo is IView view) AddView(se, view);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn("Cad", $"图纸「{sheetName}」提取失败（继续下一张）：" + ex.Message);
+                    }
+                    extract.Sheets.Add(se);
+                }
+
+                if (!string.IsNullOrEmpty(activeSheet))
+                {
+                    try { drw.ActivateSheet(activeSheet); } catch { /* 忽略 */ }
+                }
+                int viewCount = extract.Sheets.Sum(s => s.Views.Count);
+                int dimCount = extract.Sheets.SelectMany(s => s.Views).Sum(v => v.Dimensions.Count);
+                Log.Info("Cad", $"工程图提取完成：{extract.Sheets.Count} 图纸，{viewCount} 模型视图，{dimCount} 尺寸");
+                return extract;
             });
         }
 
@@ -462,6 +620,193 @@ namespace SwAiAssistant.Cad.Drawings
             return info;
         }
 
+        /// <summary>提取单个模型视图（跳过图纸伪视图）；单项读取失败仅记日志。</summary>
+        private static void AddView(DrawingSheetExtract se, IView view)
+        {
+            if (view == null) return;
+            try { if (view.Type == 1) return; }
+            catch { return; }
+
+            var ve = new DrawingViewExtract();
+            try { ve.Name = view.Name ?? ""; } catch { }
+            try { ve.Orientation = view.GetOrientationName() ?? ""; } catch { }
+            try { ve.ViewType = view.Type; } catch { }
+            try
+            {
+                if (view.Position is double[] p && p.Length >= 2)
+                {
+                    ve.PosXMm = p[0] * 1000;
+                    ve.PosYMm = p[1] * 1000;
+                }
+            }
+            catch { }
+
+            double scale = 0;
+            try { scale = view.ScaleDecimal; ve.Scale = scale; } catch { }
+            try
+            {
+                if (view.GetOutline() is double[] ol && ol.Length >= 4 && scale > 0)
+                {
+                    double wSheet = Math.Abs(ol[2] - ol[0]) * 1000;
+                    double hSheet = Math.Abs(ol[3] - ol[1]) * 1000;
+                    ve.OutlineWModelMm = wSheet / scale;
+                    ve.OutlineHModelMm = hSheet / scale;
+                }
+            }
+            catch (Exception ex) { Log.Warn("Cad", $"视图「{ve.Name}」轮廓提取失败：" + ex.Message); }
+
+            try { ve.ReferencedModelPath = view.GetReferencedModelName() ?? ""; } catch { }
+            try { ve.ModelLoaded = view.IsModelLoaded(); } catch { }
+            try { ve.Dimensions.AddRange(ExtractViewDimensions(view)); }
+            catch (Exception ex) { Log.Warn("Cad", $"视图「{ve.Name}」尺寸提取失败：" + ex.Message); }
+            try { ve.Circles.AddRange(ExtractViewCircles(view)); }
+            catch (Exception ex) { Log.Warn("Cad", $"视图「{ve.Name}」圆边提取失败：" + ex.Message); }
+
+            se.Views.Add(ve);
+        }
+
+        /// <summary>枚举视图内全部 DisplayDimension → 提取全名/类型/值/前缀后缀。</summary>
+        private static List<DrawingDimensionExtract> ExtractViewDimensions(IView view)
+        {
+            var list = new List<DrawingDimensionExtract>();
+            object raw = null;
+            try { raw = view.GetDisplayDimensions(); }
+            catch (Exception ex)
+            {
+                Log.Warn("Cad", "视图尺寸枚举失败：" + ex.Message);
+                return list;
+            }
+            if (!(raw is object[] arr)) return list;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (object o in arr)
+            {
+                if (!(o is IDisplayDimension disp)) continue;
+                try
+                {
+                    IDimension dim = disp.GetDimension2(0) as IDimension;
+                    if (dim == null) continue;
+
+                    int type = 0;
+                    try { type = (int)disp.Type2; } catch { }
+                    double sysVal = dim.SystemValue;
+                    double val = type == 3
+                        ? sysVal * 180.0 / Math.PI       // 角度：弧度 → 度
+                        : Units.MToMm(sysVal);
+
+                    string full = "";
+                    try { full = dim.FullName; } catch { }
+                    if (string.IsNullOrWhiteSpace(full))
+                    {
+                        try { full = dim.GetNameForSelection() ?? ""; } catch { }
+                    }
+                    if (!string.IsNullOrWhiteSpace(full) && !seen.Add(full)) continue;
+
+                    list.Add(new DrawingDimensionExtract
+                    {
+                        FullName = full ?? "",
+                        Kind = KindOf(type),
+                        ValueMm = val,
+                        Prefix = TryGetText(disp, 1),
+                        Suffix = TryGetText(disp, 2)
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Cad", "单个尺寸提取失败（跳过）：" + ex.Message);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// 枚举视图可见边（GetVisibleEntities2 Edge），提取其中圆边的圆心/轴向/半径。
+        /// 返回坐标为模型空间（SW 真机实测）；最多 128 个/视图，失败仅跳过。
+        /// </summary>
+        private static List<DrawingCircleExtract> ExtractViewCircles(IView view)
+        {
+            var list = new List<DrawingCircleExtract>();
+            object raw = null;
+            try { raw = view.GetVisibleEntities2(null, 1); }
+            catch (Exception ex)
+            {
+                Log.Warn("Cad", "视图可见边枚举失败：" + ex.Message);
+                return list;
+            }
+            if (!(raw is object[] arr)) return list;
+
+            int added = 0;
+            foreach (object o in arr)
+            {
+                if (!(o is IEdge edge)) continue;
+                try
+                {
+                    ICurve curve = edge.GetCurve() as ICurve;
+                    if (curve == null || !curve.IsCircle()) continue;
+                    if (!(curve.CircleParams is double[] p) || p.Length < 7) continue;
+                    list.Add(new DrawingCircleExtract
+                    {
+                        CenterXMm = p[0] * 1000,
+                        CenterYMm = p[1] * 1000,
+                        CenterZMm = p[2] * 1000,
+                        AxisX = p[3],
+                        AxisY = p[4],
+                        AxisZ = p[5],
+                        RadiusMm = p[6] * 1000
+                    });
+                    if (++added >= 128) break;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Cad", "圆边提取失败（跳过）：" + ex.Message);
+                }
+            }
+            return list;
+        }
+
+        private static string TryGetText(IDisplayDimension disp, int part)
+        {
+            try
+            {
+                string t = disp.GetText(part);
+                return t == null ? "" : t.Trim();
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>swDimensionType_e → 稳定英文种类名。</summary>
+        private static string KindOf(int type)
+        {
+            switch (type)
+            {
+                case 2:
+                case 11:
+                case 12:
+                    return "linear";
+                case 3:
+                    return "angular";
+                case 5:
+                case 14:
+                    return "radial";
+                case 6:
+                case 15:
+                    return "diameter";
+                case 10:
+                    return "chamfer";
+                case 1:
+                case 7:
+                case 8:
+                    return "ordinate";
+                case 4:
+                    return "arclength";
+                case 9:
+                case 13:
+                    return "scalar";
+                default:
+                    return "other";
+            }
+        }
+
         private int RevisionYear()
         {
             try
@@ -478,6 +823,11 @@ namespace SwAiAssistant.Cad.Drawings
         private static string SafeTitle(IModelDoc2 doc)
         {
             try { return doc.GetTitle(); } catch { return "<未知>"; }
+        }
+
+        private static string SafePath(IModelDoc2 doc)
+        {
+            try { return doc.GetPathName() ?? ""; } catch { return ""; }
         }
 
         private static string SafeFeatName(IFeature feat)

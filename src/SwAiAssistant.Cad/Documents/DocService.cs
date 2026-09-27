@@ -73,6 +73,21 @@ namespace SwAiAssistant.Cad.Documents
             });
         }
 
+        /// <summary>当前活动工程图（无活动文档或非工程图时返回 null）。只读取。</summary>
+        public IModelDoc2 GetActiveDrawing()
+        {
+            return _session.OnSta(() =>
+            {
+                var active = _session.GetActiveDocument();
+                if (active == null) return null;
+                try
+                {
+                    return active.GetType() == (int)swDocumentTypes_e.swDocDRAWING ? active : null;
+                }
+                catch { return null; }
+            });
+        }
+
         /// <summary>
         /// 确保有可用于建模的零件文档：
         /// 无活动文档 → 自动新建；活动文档为零件 → askUser 决定继续/新建；

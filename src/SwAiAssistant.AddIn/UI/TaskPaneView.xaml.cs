@@ -29,6 +29,7 @@ using SwAiAssistant.Planner.Execution;
 using SwAiAssistant.Planner.Prompts;
 using SwAiAssistant.Planner.Schema;
 using SwAiAssistant.Reverse.Dxf;
+using SwAiAssistant.Reverse.Drawing;
 using SwAiAssistant.Reverse.Image;
 
 namespace SwAiAssistant.AddIn.UI
@@ -315,6 +316,13 @@ namespace SwAiAssistant.AddIn.UI
             if (IsImageImportRequest(text))
             {
                 await ImportImageAsync().ConfigureAwait(true);
+                return;
+            }
+
+            // 按当前 SolidWorks 工程图反建零件：确定性提取 → 候选计划，人工确认后才建模
+            if (IsDrawingReverseRequest(text))
+            {
+                await ReverseFromDrawingAsync().ConfigureAwait(true);
                 return;
             }
 
@@ -1089,6 +1097,133 @@ namespace SwAiAssistant.AddIn.UI
             }
         }
 
+        // ==================== 按 SolidWorks 工程图反建零件 ====================
+
+        /// <summary>
+        /// 按图反建关键词：「工程图 + 建模/反建/制作零件」，或按图建模/按此图纸/根据（按照）图纸。
+        /// 注意与 IsDrawingRequest（生成工程图）区分：后者是出图纸，本处是按图纸出零件。
+        /// </summary>
+        private static bool IsDrawingReverseRequest(string text)
+        {
+            if (text.Contains("按图建模") || text.Contains("按此图纸")
+                || text.Contains("根据图纸") || text.Contains("按照图纸")
+                || text.Contains("当前图纸") || text.Contains("这张图纸"))
+            {
+                return true;
+            }
+            bool drawing = text.Contains("工程图");
+            bool build = text.Contains("反建") || text.Contains("建模")
+                || text.Contains("制作零件") || text.Contains("生成零件模型");
+            return drawing && build;
+        }
+
+        private async void ReverseDrawingClick(object sender, RoutedEventArgs e)
+            => await ReverseFromDrawingAsync().ConfigureAwait(true);
+
+        /// <summary>
+        /// 按当前 SolidWorks 工程图反建：读取活动工程图 → 确定性提取（视图标注 + 可见圆边模型坐标）
+        /// + 导出图纸图（视觉补充）→ DrawingReversePlanner（文本优先）→ 候选计划卡片；
+        /// 信息不足时气泡向用户追问。未点计划页「执行」前绝不建模；不打开工程图引用的源零件。
+        /// </summary>
+        private async Task ReverseFromDrawingAsync()
+        {
+            if (_reverseBusy) return;
+            if (_drawings == null || _capture == null)
+            {
+                AddAiBubble("按图建模服务尚未就绪，请稍候或重启 SolidWorks。");
+                return;
+            }
+
+            SolidWorks.Interop.sldworks.IModelDoc2 drawing = null;
+            try { drawing = _docs.GetActiveDrawing(); }
+            catch (Exception ex) { Log.Warn("UI", "活动工程图读取失败：" + ex.Message); }
+            if (drawing == null)
+            {
+                AddAiBubble("当前没有打开的 SolidWorks 工程图（.slddrw）。请先切换到要反建的工程图文档，再点「按图建模」。");
+                return;
+            }
+
+            _reverseBusy = true;
+            ImportDxfButton.IsEnabled = false;
+            ImportImageButton.IsEnabled = false;
+            ReverseDrawingButton.IsEnabled = false;
+            RootTabs.SelectedItem = ChatTab;
+            StatusText.Text = "正在按工程图提取尺寸…";
+            string title = "";
+            try { title = drawing.GetTitle(); } catch { }
+            var bubble = AddAiBubble(
+                $"正在读取当前工程图「{title}」的视图、标注与几何，生成候选建模计划"
+                + "（不打开源零件；此阶段不会改动 SolidWorks）…");
+            try
+            {
+                DrawingExtract extract = await Task.Run(
+                    () => _drawings.ExtractDrawing(drawing)).ConfigureAwait(true);
+
+                string sheetImage = null;
+                try
+                {
+                    string shotDir = Path.Combine(Path.GetTempPath(), "SwAiAssistant", "draw");
+                    IList<string> shots = await Task.Run(
+                        () => _capture.CaptureDrawingSheets(drawing, shotDir, 1600)).ConfigureAwait(true);
+                    sheetImage = shots.FirstOrDefault();
+                }
+                catch (Exception ex)
+                {
+                    // 图纸图导出失败不阻断文本路径
+                    Log.Warn("UI", "工程图图纸图导出失败（继续纯文本路径）：" + ex.Message);
+                }
+
+                var profiles = await GetProfilesAsync(CancellationToken.None).ConfigureAwait(true);
+                var planner = new DrawingReversePlanner(_scheduler);
+                var result = await Task.Run(async () =>
+                    await planner.PlanAsync(extract, profiles, sheetImage, CancellationToken.None)
+                        .ConfigureAwait(false)).ConfigureAwait(true);
+
+                if (result.NeedClarify)
+                {
+                    bubble.Text = "工程图中可确定的信息不足，已停在规划阶段，SolidWorks 未发生任何变化。\n"
+                        + "需要你确认：" + result.ClarifyText
+                        + "\n请直接回复补充信息，我会重新按图建模；或换用标注更完整的图纸。";
+                    Log.Info("UI", "工程图反建要求澄清：" + result.ClarifyText);
+                    return;
+                }
+
+                var sb = new StringBuilder();
+                sb.AppendLine("工程图反建完成：" + title);
+                if (!string.IsNullOrWhiteSpace(result.Summary)) sb.AppendLine(result.Summary);
+                sb.AppendLine($"规划路径：{(result.UsedVision ? "视觉模型读图" : "确定性尺寸文本")}"
+                    + $"，模型自评置信度：{result.ConfidenceText}");
+                foreach (var w in result.Warnings) sb.AppendLine("⚠ " + w);
+
+                BuildPlanCard(result.Tree,
+                    DrawingReversePlanner.FormatBanner(result.Confidence, result.UsedVision));
+                sb.Append("已生成候选建模计划并切到「计划」页，请逐项核对草图尺寸与孔径，确认无误后点「执行」建模。");
+                bubble.Text = sb.ToString();
+                RootTabs.SelectedItem = PlanTab;
+                Log.Info("UI", $"工程图反建候选已生成：{title}，{result.Tree.Steps.Count} 步，"
+                    + $"路径={(result.UsedVision ? "视觉" : "文本")}，置信度 {result.ConfidenceText}");
+            }
+            catch (LlmException ex)
+            {
+                bubble.Text = "按图建模未能完成：" + ex.Message;
+                Log.Warn("UI", "工程图反建失败：" + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("UI", "工程图反建异常", ex);
+                bubble.Text = SwAiAssistant.Core.Diagnostics.ErrorText.Friendly("按工程图反建", ex);
+            }
+            finally
+            {
+                _reverseBusy = false;
+                ImportDxfButton.IsEnabled = true;
+                ImportImageButton.IsEnabled = true;
+                ReverseDrawingButton.IsEnabled = true;
+                StatusText.Text = "就绪";
+                ScrollChat();
+            }
+        }
+
         // ==================== 计划卡片 ====================
 
         private sealed class PlanRow
@@ -1541,6 +1676,8 @@ namespace SwAiAssistant.AddIn.UI
         private static bool AssignText(PlanStep step, string key, string v, out string error)
         {
             error = null;
+            // 卡片中 Fmt(null) 渲染的占位符「-」按空值处理（如贯穿切除无深度、旋转角缺省）
+            if (v == "-" || v == "–") v = "";
             switch (key)
             {
                 case "sketch.plane": step.Sketch.Plane = v; return true;
@@ -1551,6 +1688,7 @@ namespace SwAiAssistant.AddIn.UI
                     if (TryDouble(v, out double depth)) { step.Extrude.DepthMm = depth; return true; }
                     error = "深度必须是数字。"; return false;
                 case "revolve.angleDeg":
+                    if (v.Length == 0) return true; // 留空＝保持 null（执行器默认 360°）
                     if (TryDouble(v, out double ang)) { step.Revolve.AngleDeg = ang; return true; }
                     error = "旋转角必须是数字。"; return false;
                 case "fillet.radiusMm":
@@ -1566,6 +1704,7 @@ namespace SwAiAssistant.AddIn.UI
                     if (TryDouble(v, out double sp)) { step.Pattern.SpacingMm = sp; return true; }
                     error = "阵列间距必须是数字。"; return false;
                 case "pattern.totalAngleDeg":
+                    if (v.Length == 0) return true; // 留空＝保持 null（执行器默认 360°）
                     if (TryDouble(v, out double ta)) { step.Pattern.TotalAngleDeg = ta; return true; }
                     error = "阵列总角必须是数字。"; return false;
                 case "pattern.count":

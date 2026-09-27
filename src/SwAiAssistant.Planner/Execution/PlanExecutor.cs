@@ -140,6 +140,12 @@ namespace SwAiAssistant.Planner.Execution
             // 草图步骤 id → SW 草图名；特征步骤 id → AI__ 特征名（阵列/镜像引用用）
             var sketchNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var featureNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // 步骤 id → 步骤（供阵列等步骤回溯种子草图面，推导旋转轴方向）
+            var stepById = new Dictionary<string, PlanStep>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in plan.Steps)
+            {
+                if (!string.IsNullOrEmpty(s?.Id)) stepById[s.Id] = s;
+            }
 
             for (int i = 0; i < plan.Steps.Count; i++)
             {
@@ -148,7 +154,7 @@ namespace SwAiAssistant.Planner.Execution
                 ReportProgress(i, plan.Steps.Count, step, "开始");
                 try
                 {
-                    ExecuteStep(doc, step, sketchNames, featureNames, report);
+                    ExecuteStep(doc, step, stepById, sketchNames, featureNames, report);
                 }
                 catch (CadException)
                 {
@@ -170,7 +176,7 @@ namespace SwAiAssistant.Planner.Execution
             return report;
         }
 
-        private void ExecuteStep(IModelDoc2 doc, PlanStep step,
+        private void ExecuteStep(IModelDoc2 doc, PlanStep step, Dictionary<string, PlanStep> stepById,
             Dictionary<string, string> sketchNames, Dictionary<string, string> featureNames,
             ExecutionReport report)
         {
@@ -252,7 +258,8 @@ namespace SwAiAssistant.Planner.Execution
                 {
                     string seed = ResolveFeature(step, step.Pattern.SourceStepId, featureNames);
                     var feat = _features.CircularPatternMm(doc, _geo, seed,
-                        step.Pattern.Count ?? 2, step.Pattern.TotalAngleDeg ?? 360);
+                        step.Pattern.Count ?? 2, step.Pattern.TotalAngleDeg ?? 360,
+                        ResolvePatternAxisDir(step, stepById));
                     RegisterFeature(doc, step, feat, featureNames, report);
                     break;
                 }
@@ -453,6 +460,32 @@ namespace SwAiAssistant.Planner.Execution
                 case "right": return PlaneKind.Right;
                 default: return PlaneKind.Top;
             }
+        }
+
+        /// <summary>
+        /// 推导圆周阵列旋转轴方向（x/y/z）：拉伸类种子的草图面法向即拉伸方向
+        /// （front→z / top→y / right→x）。旋转、孔向导等种子返回 null，
+        /// 由几何服务退化为「任意轴向半径最大者」。
+        /// </summary>
+        private static string ResolvePatternAxisDir(PlanStep patternStep, Dictionary<string, PlanStep> stepById)
+        {
+            try
+            {
+                if (patternStep?.Pattern?.SourceStepId == null || stepById == null) return null;
+                if (!stepById.TryGetValue(patternStep.Pattern.SourceStepId, out PlanStep seedStep) || seedStep == null) return null;
+                string kind = (seedStep.Kind ?? "").ToLowerInvariant();
+                if (kind != "extrudeboss" && kind != "extrudecut") return null;
+                if (string.IsNullOrEmpty(seedStep.SketchId)) return null;
+                if (!stepById.TryGetValue(seedStep.SketchId, out PlanStep sketchStep) || sketchStep?.Sketch == null) return null;
+                switch ((sketchStep.Sketch.Plane ?? "").ToLowerInvariant())
+                {
+                    case "front": return "z";
+                    case "top": return "y";
+                    case "right": return "x";
+                    default: return null;
+                }
+            }
+            catch { return null; }
         }
 
         private static EdgeTarget ParseEdgeTarget(string target)

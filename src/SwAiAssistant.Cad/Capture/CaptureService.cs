@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SwAiAssistant.Core.Logging;
 
@@ -50,6 +51,97 @@ namespace SwAiAssistant.Cad.Capture
             }
             Log.Info("Capture", $"截图完成 {files.Count}/4 视角 → {outDir}");
             return files;
+        }
+
+        /// <summary>
+        /// 逐图纸导出工程图高清 PNG（ActivateSheet + ZoomToFit；PNG 失败回退 JPG 再转码），
+        /// 等比缩放长边 ≤maxSide；全部失败抛 CadException；导出后还原原活动图纸。
+        /// </summary>
+        public IList<string> CaptureDrawingSheets(IModelDoc2 doc, string outDir, int maxSide = 1600)
+        {
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
+            Directory.CreateDirectory(outDir);
+            var drw = doc as IDrawingDoc;
+            if (drw == null) throw new CadException("文档不是工程图。");
+
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
+            object snObj = _session.OnSta<object>(() => drw.GetSheetNames());
+            string[] sheetNames = snObj is string[] sn
+                ? sn
+                : (snObj is object[] oa ? oa.OfType<string>().ToArray() : new string[0]);
+
+            string activeSheet = _session.OnSta(
+                () => (drw.IGetCurrentSheet() as ISheet)?.GetName());
+
+            var files = new List<string>();
+            for (int i = 0; i < sheetNames.Length; i++)
+            {
+                string pngPath = Path.Combine(outDir,
+                    $"sheet-{stamp}-{i + 1}-{SanitizeFilePart(sheetNames[i])}.png");
+                TryCaptureSheet(drw, sheetNames[i], pngPath, maxSide, files);
+            }
+
+            _session.OnSta<object>(() =>
+            {
+                if (!string.IsNullOrEmpty(activeSheet)) drw.ActivateSheet(activeSheet);
+                return null;
+            });
+
+            if (files.Count == 0) throw new CadException("全部工程图图纸导出失败。");
+            Log.Info("Capture", $"工程图导出完成 {files.Count}/{sheetNames.Length} 图纸 → {outDir}");
+            return files;
+        }
+
+        private void TryCaptureSheet(IDrawingDoc drw, string sheetName, string pngPath,
+            int maxSide, List<string> files)
+        {
+            string tmpJpg = null;
+            try
+            {
+                _session.OnSta<object>(() =>
+                {
+                    drw.ActivateSheet(sheetName);
+                    var model = (IModelDoc2)drw;
+                    model.ViewZoomtofit2();
+                    int errors = 0, warnings = 0;
+                    bool pngOk = model.SaveAs4(pngPath, 0, 1, ref errors, ref warnings)
+                        && errors == 0 && File.Exists(pngPath);
+                    if (!pngOk)
+                    {
+                        tmpJpg = Path.ChangeExtension(pngPath, ".jpg");
+                        int e2 = 0, w2 = 0;
+                        bool jpgOk = model.SaveAs4(tmpJpg, 0, 1, ref e2, ref w2)
+                            && e2 == 0 && File.Exists(tmpJpg);
+                        if (!jpgOk)
+                        {
+                            throw new CadException(
+                                $"图纸「{sheetName}」导出失败（PNG errors={errors}，JPG errors={e2}）。");
+                        }
+                    }
+                    return null;
+                });
+                if (tmpJpg != null)
+                {
+                    ConvertToScaledPng(tmpJpg, pngPath, maxSide);
+                    try { File.Delete(tmpJpg); } catch { /* 临时文件删除失败忽略 */ }
+                }
+                else
+                {
+                    ConvertToScaledPng(pngPath, pngPath, maxSide);
+                }
+                files.Add(pngPath);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Capture", $"图纸「{sheetName}」导出失败（跳过）：{ex.Message}");
+            }
+        }
+
+        private static string SanitizeFilePart(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "sheet";
+            char[] invalid = Path.GetInvalidFileNameChars();
+            return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
         }
 
         /// <summary>捕获等轴测单视角 PNG（快速复核用）。</summary>

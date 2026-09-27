@@ -428,10 +428,11 @@ namespace SwAiAssistant.Cad.Features
 
         /// <summary>
         /// 圆周阵列。Mark 约定：种子特征=4，轴=1（预选圆柱面/圆边，半径最大者）。
+        /// axisDir 为期望旋转轴方向（x/y/z；null=不限，由几何服务退化兜底）。
         /// EqualSpacing=true：Spacing=总张角弧度（360° 均布=2π）。
         /// </summary>
         public IFeature CircularPatternMm(IModelDoc2 doc, GeometryService geo, string seedFeatureName,
-            int count, double totalAngleDeg)
+            int count, double totalAngleDeg, string axisDir = null)
         {
             if (doc == null) throw new ArgumentNullException(nameof(doc));
             if (geo == null) throw new ArgumentNullException(nameof(geo));
@@ -444,7 +445,7 @@ namespace SwAiAssistant.Cad.Features
                 {
                     doc.ClearSelection2(true);
                     SelectFeatureByName(doc, seedFeatureName, append: false, mark: 4);
-                    if (!geo.SelectCircularAxis(doc, append: true, mark: 1))
+                    if (!geo.SelectCircularAxis(doc, axisDir, append: true, mark: 1))
                     {
                         throw new CadException("圆周阵列失败：未找到旋转轴（轴线平行拉伸方向的圆柱面/圆边）。");
                     }

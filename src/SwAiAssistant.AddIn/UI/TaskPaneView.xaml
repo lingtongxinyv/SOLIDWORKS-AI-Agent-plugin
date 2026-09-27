@@ -42,6 +42,9 @@
                         <Button Content="导入图片" x:Name="ImportImageButton" Padding="8,2" Margin="6,0,0,0"
                                 Click="ImportImageClick"
                                 ToolTip="实验功能：识别图纸照片/截图/PDF 首页（JPG/PNG/PDF）生成候选建模计划，逐项核对后手动点「执行」"/>
+                        <Button Content="按图建模" x:Name="ReverseDrawingButton" Padding="8,2" Margin="6,0,0,0"
+                                Click="ReverseDrawingClick"
+                                ToolTip="读取当前打开的 SolidWorks 工程图（.slddrw）：按视图标注与几何反建新零件，生成候选计划供核对（不使用源零件文件）"/>
                     </StackPanel>
 
                     <ScrollViewer Grid.Row="1" x:Name="ChatScroll" VerticalScrollBarVisibility="Auto">

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SwAiAssistant.Cad;
 using SwAiAssistant.Cad.Assemblies;
+using SwAiAssistant.Cad.Capture;
 using SwAiAssistant.Cad.Documents;
 using SwAiAssistant.Cad.Drawings;
 using SwAiAssistant.Cad.Features;
@@ -20,6 +21,7 @@ using SwAiAssistant.Core.Configuration;
 using SwAiAssistant.Core.Threading;
 using SwAiAssistant.Planner.Execution;
 using SwAiAssistant.Planner.Schema;
+using SwAiAssistant.Reverse.Drawing;
 using SwAiAssistant.Reverse.Dxf;
 using SwAiAssistant.Reverse.Image;
 using SwAiAssistant.Ai;
@@ -57,6 +59,13 @@ namespace SwAiAssistant.SwIaTest
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.WriteLine("== SwIaTest：SolidWorks 会话/文档集成测试（TR-4.1）==");
 
+            if (args.Contains("--probe-draw5", StringComparer.OrdinalIgnoreCase))
+            {
+                string extra = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)
+                    && a.EndsWith(".slddrw", StringComparison.OrdinalIgnoreCase));
+                return RunProbeDraw5(visible, extra,
+                    args.Contains("plan", StringComparer.OrdinalIgnoreCase));
+            }
             if (args.Contains("--probe-draw4", StringComparer.OrdinalIgnoreCase))
             {
                 return RunProbeDraw4(visible);
@@ -2937,6 +2946,145 @@ namespace SwAiAssistant.SwIaTest
         /// 链式尝试：标记回读 → 重建重存 → 视图模型加载状态/LoadModel → ActivateSheet/ActivateView →
         /// InsertModelAnnotations4(组合 Option) → 旧版 InsertModelAnnotations(AllTypes) → ImportAnnotations(全 true)。
         /// </summary>
+        /// <summary>
+        /// 工程图反建链路探测 5.0（--probe-draw5 [drawingPath]）：
+        /// 对当前活动工程图（或指定路径文件）执行 DrawingService.ExtractDrawing +
+        /// CaptureService.CaptureDrawingSheets，打印视图方向/比例/轮廓/尺寸的真机实际值。
+        /// </summary>
+        private static int RunProbeDraw5(bool visible, string drawingPath, bool withPlan)
+        {
+            Console.WriteLine("== SwIaTest：工程图反建提取探测 5.0（--probe-draw5）==");
+            CleanupOwnedOrphan();
+            using (var sta = new StaExecutor("SwIaTestProbeSTA"))
+            {
+                SwSession session = null;
+                try
+                {
+                    session = SwSession.ConnectOrStart(sta, visible, out bool startedNew);
+                    if (startedNew) WriteOwnedPidMarker(session.OwnedProcessId);
+                    Console.WriteLine("[探测] SW 版本 " + session.Revision + (startedNew ? "（自有实例）" : "（接管模式）"));
+
+                    if (!string.IsNullOrWhiteSpace(drawingPath))
+                    {
+                        int e = 0, w = 0;
+                        var opened = session.App.OpenDoc6(drawingPath, 3, 1, "", ref e, ref w) as IModelDoc2;
+                        Check("打开指定工程图 errors=" + e + "：" + drawingPath, opened != null);
+                        if (opened == null) return 1;
+                    }
+
+                    var doc = session.GetActiveDocument();
+                    Check("存在活动文档", doc != null);
+                    bool isDrawing = false;
+                    if (doc != null) { try { isDrawing = doc is IDrawingDoc; } catch { } }
+                    Check("活动文档是工程图（.slddrw）", isDrawing);
+                    if (doc == null || !isDrawing) return 1;
+
+                    var drawings = new DrawingService(session, new QueryService(session));
+                    var capture = new CaptureService(session);
+
+                    DrawingExtract extract = drawings.ExtractDrawing(doc);
+                    Console.WriteLine("[提取] 标题=" + extract.Title);
+                    Console.WriteLine("[提取] 路径=" + (string.IsNullOrEmpty(extract.FilePath) ? "<未保存>" : extract.FilePath));
+                    foreach (DrawingSheetExtract sheet in extract.Sheets)
+                    {
+                        Console.WriteLine($"[提取] 图纸「{sheet.Name}」 {sheet.WidthMm:0.#}×{sheet.HeightMm:0.#} mm，模型视图 {sheet.Views.Count} 个");
+                        foreach (DrawingViewExtract v in sheet.Views)
+                        {
+                            Console.WriteLine($"[提取]   视图「{v.Name}」 type={v.ViewType} 方向={v.Orientation} 比例=1:{v.Scale:0.###}"
+                                + $" 位置=({v.PosXMm:0.#},{v.PosYMm:0.#}) 轮廓模型={v.OutlineWModelMm:0.##}×{v.OutlineHModelMm:0.##}mm"
+                                + $" 引用={(string.IsNullOrEmpty(v.ReferencedModelPath) ? "<无>" : v.ReferencedModelPath)} loaded={v.ModelLoaded}");
+                            foreach (DrawingDimensionExtract d in v.Dimensions)
+                            {
+                                Console.WriteLine($"[提取]     尺寸 {d.FullName} kind={d.Kind} 值={d.ValueMm:0.###} 前缀=「{d.Prefix}」 后缀=「{d.Suffix}」");
+                            }
+                        }
+                    }
+
+                    string outDir = Path.Combine(Path.GetTempPath(), "SwAiAssistant-iat", "probe-draw5");
+                    foreach (DrawingViewExtract v in extract.Sheets.SelectMany(s => s.Views))
+                    {
+                        if (v.Circles.Count == 0) continue;
+                        Console.WriteLine($"[提取]   视图「{v.Name}」可见圆边 {v.Circles.Count} 个：");
+                        foreach (DrawingCircleExtract c in v.Circles)
+                        {
+                            Console.WriteLine($"[提取]     圆 c=({c.CenterXMm:0.###},{c.CenterYMm:0.###},{c.CenterZMm:0.###}) "
+                                + $"axis=({c.AxisX:0.##},{c.AxisY:0.##},{c.AxisZ:0.##}) r={c.RadiusMm:0.###}");
+                        }
+                    }
+
+                    IList<string> imgs = capture.CaptureDrawingSheets(doc, outDir, 1600);
+                    foreach (string f in imgs) Console.WriteLine("[提取] 图纸图像 → " + f);
+
+                    if (withPlan)
+                    {
+                        Console.WriteLine("[规划] 开始端到端反建规划（文本优先，视觉补充）…");
+                        var swCfg = ConfigService.Default;
+                        var swProbe = new CapabilityProbe(swCfg);
+                        var scheduler = new Scheduler(swCfg, swProbe);
+                        var profileDict = new Dictionary<string, ModelProfile>(StringComparer.OrdinalIgnoreCase);
+                        foreach (ModelConfigEntry e in swCfg.EnabledModels())
+                        {
+                            ModelProfile p = swProbe.GetCached(e.Id, e.Model);
+                            if (p == null)
+                            {
+                                p = new ModelProfile
+                                {
+                                    EntryId = e.Id,
+                                    Model = e.Model,
+                                    Protocol = ProbeProtocol.OpenAiCompatible,
+                                    TextCapable = e.ManualTextCapable,
+                                    VisionCapable = e.ManualVisionCapable,
+                                    Source = "manual"
+                                };
+                            }
+                            profileDict[e.Id] = p;
+                        }
+
+                        var planner = new DrawingReversePlanner(scheduler);
+                        DrawingReversePlanResult pr = Task.Run(async () =>
+                            await planner.PlanAsync(extract, profileDict, imgs.FirstOrDefault(),
+                                CancellationToken.None).ConfigureAwait(false)
+                        ).GetAwaiter().GetResult();
+
+                        if (pr.NeedClarify)
+                        {
+                            Console.WriteLine("[规划] NeedClarify：" + pr.ClarifyText);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[规划] 成功：{pr.Tree.Steps.Count} 步，"
+                                + $"路径={(pr.UsedVision ? "视觉" : "文本")}，"
+                                + $"置信度 {pr.ConfidenceText}，摘要：{pr.Summary}");
+                            foreach (PlanStep s in pr.Tree.Steps)
+                            {
+                                Console.WriteLine($"[规划]   {s.Id} {s.Kind} {s.Title}");
+                            }
+                            foreach (string w in pr.Warnings) Console.WriteLine("[规划]   ⚠ " + w);
+                        }
+                    }
+
+                    if (startedNew)
+                    {
+                        session.Dispose();
+                        session = null;
+                        Console.WriteLine("[探测] 自有实例退出=" + WaitOwnedProcessExit(GetSwPids(), TimeSpan.FromSeconds(60)));
+                        DeleteOwnedPidMarker();
+                    }
+                    Console.WriteLine("== 探测 5.0 完成 ==");
+                    return _failures > 0 ? 1 : 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[探测] 异常: " + ex);
+                    return 1;
+                }
+                finally
+                {
+                    session?.Dispose();
+                }
+            }
+        }
+
         private static int RunProbeDraw4(bool visible)
         {
             Console.WriteLine("== SwIaTest：工程图 API 探测 4.0（--probe-draw4）==");
